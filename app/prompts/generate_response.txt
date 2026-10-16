@@ -1,0 +1,30 @@
+Write a personalized response to this employee's HR case. DO NOT use generic
+phrases like "Thank you for reaching out" or "Here are the next steps."
+Instead, reference specific details from the case, the employee's context, and
+the actions below.
+
+Employee ID: {employee_id}
+
+Employee context (role, tenure, location, recent HR interactions):
+{employee_context}
+
+Relevant policy excerpts:
+{policy_snippets}
+
+Summary and actions from the case:
+{actions}
+
+Tone: {tone}
+
+Requirements:
+- Subject: Reference something specific from the case (e.g. "Your leave of absence request - next steps" not "Following up")
+- Body: 2-4 sentences that mention the specific situation and the concrete next steps. Use the policy excerpts if relevant, and be precise about what policy applies.
+- Do NOT write a generic template. Make it clear this response is tailored to this employee's specific case.
+- If the case involves a legally sensitive topic (leave, accommodation, harassment, discrimination), be accurate and conservative - when in doubt, direct the employee to their HR partner rather than asserting an outcome.
+
+Respond with ONLY a valid JSON object (no markdown, no explanation) with these
+exact keys:
+- subject: string
+- body: string
+- tone: "{tone}"
+- cited_snippets: array of strings (snippets from the policy excerpts that you used, or empty array)

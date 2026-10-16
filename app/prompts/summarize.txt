@@ -1,0 +1,14 @@
+Summarize this HR case and extract specific action items and next steps.
+
+Employee ID: {employee_id}
+Case description: {case_transcript}
+
+Extract concrete details: What is the employee asking for or reporting? What
+policy area does this touch? What are the specific next steps for the HR
+partner handling this case?
+
+Respond with ONLY a valid JSON object (no markdown, no explanation) with these
+exact keys:
+- summary: string (2-3 sentences capturing the key facts of the case)
+- action_items: array of strings (specific items like "Verify FMLA eligibility against tenure" not "follow up")
+- next_steps: array of strings (concrete next steps like "Send accommodation request form")

@@ -1,0 +1,49 @@
+{
+  "employees": [
+    {
+      "employee_id": "E10234",
+      "metadata": {
+        "department": "Field Operations",
+        "level": "P30",
+        "location": "Remote - US Zone 3",
+        "manager": "R. Alvarez",
+        "tenure_years": 2.4,
+        "employment_status": "active"
+      },
+      "last_activities": [
+        {"type": "case", "date": "2026-06-02", "summary": "Asked about PTO carryover policy"},
+        {"type": "case", "date": "2026-02-11", "summary": "Onboarding - benefits enrollment question"}
+      ]
+    },
+    {
+      "employee_id": "E10897",
+      "metadata": {
+        "department": "Engineering",
+        "level": "P50",
+        "location": "San Francisco Bay Area",
+        "manager": "K. Chen",
+        "tenure_years": 5.1,
+        "employment_status": "active"
+      },
+      "last_activities": [
+        {"type": "case", "date": "2026-07-20", "summary": "Requested leave of absence paperwork"},
+        {"type": "case", "date": "2026-05-03", "summary": "Asked about parental leave eligibility timeline"}
+      ]
+    },
+    {
+      "employee_id": "E11342",
+      "metadata": {
+        "department": "Sales",
+        "level": "P20",
+        "location": "Remote - US Zone 2",
+        "manager": "T. Nakamura",
+        "tenure_years": 0.8,
+        "employment_status": "active"
+      },
+      "last_activities": [
+        {"type": "case", "date": "2026-08-14", "summary": "Expense reimbursement dispute for travel"},
+        {"type": "case", "date": "2026-03-22", "summary": "Onboarding - remote work equipment request"}
+      ]
+    }
+  ]
+}
