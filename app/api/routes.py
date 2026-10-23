@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Literal
 
-from app.engine.runner import run_workflow
+from app.engine.runner import run_workflow, IdempotencyConflict
 from app.storage.database import SessionLocal
 from app.storage.models import Case, Step, CaseNote, EmployeeRecord
 
@@ -56,6 +56,9 @@ def create_case(req: CreateCaseRequest):
             idempotency_key=req.idempotency_key,
         )
         return result
+    #new conflict raised if someone enters a new desc/emp ID with a previous idempotency key
+    except IdempotencyConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         import traceback
         traceback.print_exc()  # prints full case transcript/context to stdout on failure, see P017

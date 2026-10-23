@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 import concurrent.futures
 
-from app.engine.runner import run_workflow
+from app.engine.runner import run_workflow, IdempotencyConflict
 from app.storage.database import SessionLocal
 from app.storage.models import EmployeeRecord
 from app.storage.models import Case, CaseNote, EmployeeRecord
@@ -67,3 +67,10 @@ def test_concurrent_same_key_creates_one_case(seeded):
     assert len({r["case_id"] for r in results}) == 1
     assert _count(Case, idempotency_key=key) == 1
     assert _count(CaseNote, case_id=results[0]["case_id"]) == 1
+
+
+def test_same_key_different_inputs_is_a_conflict(seeded):
+    key = "lifecycle-conflict-key"
+    run_workflow(_inputs("First description."), idempotency_key=key)
+    with pytest.raises(IdempotencyConflict):
+        run_workflow(_inputs("A different description."), idempotency_key=key)

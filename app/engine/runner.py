@@ -16,6 +16,14 @@ from app.storage.models import Case, Step
 
 
 logger = logging.getLogger(__name__)
+#catch when someone inputs an existing idempotency key but with mismatched emp id and/or desc
+class IdempotencyConflict(Exception):
+    """The idempotency key was already used with different inputs"""
+
+
+def _check_same_inputs(case: Case, inputs: dict) -> None:
+    if json.loads(case.inputs_json or "{}") != inputs:
+        raise IdempotencyConflict("Idempotency key was already used with different inputs")
 
 
 @retry(
@@ -33,6 +41,9 @@ def run_workflow(
         existing = None
         if idempotency_key is not None:
             existing = db.query(Case).filter_by(idempotency_key=idempotency_key).first()
+        #use new check to see if an existing idempotency key has the same inputs as the db
+        if existing is not None:
+            _check_same_inputs(existing, inputs)
         if existing and existing.status == "completed":
             return {
                 "case_id": existing.id,
@@ -65,7 +76,10 @@ def run_workflow(
                 db.rollback()
                 winner = db.query(Case).filter_by(idempotency_key=idempotency_key).first()
                 if winner is None:
-                    raise #flag to catch other issue (something is wrong if there is no matching key)
+                    #flag to catch other issue (something is wrong if there is no matching key)
+                    raise
+                # new check if case with previous idempotency key is used, check all inputs match
+                _check_same_inputs(winner, inputs)
                 return {
                     "case_id": winner.id,
                     "status": winner.status,
