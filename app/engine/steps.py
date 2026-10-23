@@ -123,8 +123,8 @@ def generate_structured_response_step(ctx):
     metadata = employee.get("metadata", {}) if isinstance(employee, dict) else {}
     employee_str = json.dumps({k: metadata[k] for k in PROMPT_EMPLOYEE_FIELDS if k in metadata}, indent=2)
     actions_str = json.dumps(actions, indent=2) if isinstance(actions, dict) else str(actions)
-    snippets_str = "\n\n---\n\n".join(f"[{i+1}] {s[:600]}" for i, s in enumerate(snippets[:5])) if snippets else "(none retrieved)"
-
+    #no truncation
+    snippets_str = "\n\n---\n\n".join(f"[{i+1}] {s}" for i, s in enumerate(snippets[:5])) if snippets else "(none retrieved)"
     prompt_tpl = _load_prompt("generate_response")
     prompt = prompt_tpl.format(
         employee_context=employee_str,
