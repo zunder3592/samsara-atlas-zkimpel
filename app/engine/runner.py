@@ -6,11 +6,14 @@ from datetime import datetime, timezone
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
+
 
 from app.engine.context import ExecutionContext
 from app.engine.steps import STEPS
 from app.storage.database import SessionLocal
 from app.storage.models import Case, Step
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +29,11 @@ def run_workflow(
 ) -> dict:
     db = SessionLocal()
     try:
+        #only find the first db record if the idempotency key is not null to fix bug of finding the last previous null when a key is not given
         existing = None
         if idempotency_key is not None:
             existing = db.query(Case).filter_by(idempotency_key=idempotency_key).first()
+        if existing and existing.status == "completed":
             return {
                 "case_id": existing.id,
                 "status": existing.status,
@@ -52,7 +57,20 @@ def run_workflow(
                 artifacts_json=json.dumps({"prompt_version": "v1"}),
             )
             db.add(case)
-            db.commit()
+            #try except added to work with new WAL configuration in db
+            try:
+                db.commit()
+            except IntegrityError:
+                # Another request with the same key got there first. Return the winner's case
+                db.rollback()
+                winner = db.query(Case).filter_by(idempotency_key=idempotency_key).first()
+                if winner is None:
+                    raise #flag to catch other issue (something is wrong if there is no matching key)
+                return {
+                    "case_id": winner.id,
+                    "status": winner.status,
+                    "outputs": json.loads(winner.outputs_json or "{}"),
+                }
             db.refresh(case)
 
         artifacts = {"prompt_version": "v1", "model_name": "stub"}

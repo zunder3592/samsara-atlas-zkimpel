@@ -11,9 +11,8 @@ class Case(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String(50), default="pending")
-    # No unique constraint on idempotency_key - the DB itself doesn't prevent
-    # duplicate cases under concurrent requests with the same key (see P002).
-    idempotency_key = Column(String(255), index=True)
+    # changed to unique in the database to accomodate the idempotency bug fix that just found the previous null key if none was entered
+    idempotency_key = Column(String(255), unique=True, index=True)
     inputs_json = Column(Text)
     artifacts_json = Column(Text)
     outputs_json = Column(Text)
