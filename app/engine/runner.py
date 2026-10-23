@@ -26,8 +26,9 @@ def run_workflow(
 ) -> dict:
     db = SessionLocal()
     try:
-        existing = db.query(Case).filter_by(idempotency_key=idempotency_key).first()
-        if existing and existing.status == "completed":
+        existing = None
+        if idempotency_key is not None:
+            existing = db.query(Case).filter_by(idempotency_key=idempotency_key).first()
             return {
                 "case_id": existing.id,
                 "status": existing.status,
