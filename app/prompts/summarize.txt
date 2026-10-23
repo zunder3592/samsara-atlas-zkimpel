@@ -1,6 +1,6 @@
 Summarize this HR case and extract specific action items and next steps.
 
-Employee ID: {employee_id}
+
 Case description: {case_transcript}
 
 Extract concrete details: What is the employee asking for or reporting? What

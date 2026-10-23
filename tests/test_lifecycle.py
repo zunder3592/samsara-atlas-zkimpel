@@ -12,6 +12,7 @@ from app.storage.models import Case, CaseNote, EmployeeRecord, Step
 import app.engine.steps as steps_module
 from app.providers.base import CompletionResponse
 
+
 @pytest.fixture
 def seeded(db_session):
     db = SessionLocal()
@@ -209,3 +210,61 @@ def test_replay_is_linked_and_writes_no_case_note_by_default(client, seeded):
 
     with_note = client.post(f"/cases/{original['case_id']}/replay?write_case_note=true").json()
     assert _count(CaseNote, case_id=with_note["case_id"]) == 1
+
+
+
+#limit emp data going to model
+
+class RecordingProvider:
+    """A fake model that remembers every prompt it was sent."""
+
+    def __init__(self):
+        self.prompts = []
+
+    def complete(self, prompt, **kwargs):
+        self.prompts.append(prompt)
+        if len(self.prompts) == 1:
+            return CompletionResponse(
+                text=json.dumps({"summary": "s", "action_items": [], "next_steps": []})
+            )
+        return CompletionResponse(
+            text=json.dumps(
+                {"subject": "Subject", "body": "Body", "tone": "empathetic", "cited_snippets": []}
+            )
+        )
+
+
+def test_model_prompts_exclude_employee_id_and_extra_record_fields(db_session, monkeypatch):
+    db = SessionLocal()
+    try:
+        db.add(
+            EmployeeRecord(
+                employee_id="E77777",
+                metadata_json=json.dumps(
+                    {
+                        "manager": "Secret Manager",
+                        "location": "Remote - US Zone 9",
+                        "tenure_years": 7.5,
+                        "employment_status": "active",
+                    }
+                ),
+                last_activities_json=json.dumps([{"summary": "Secret past case"}]),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    provider = RecordingProvider()
+    monkeypatch.setattr(steps_module, "get_provider", lambda: provider)
+
+    inputs = {"employee_id": "E77777", "case_transcript": "Asked about leave.", "tone": "empathetic"}
+    result = run_workflow(inputs)
+    assert result["status"] == "completed"
+
+    combined = " ".join(provider.prompts)
+    assert len(provider.prompts) == 2  # one per AI step
+    assert "E77777" not in combined
+    assert "Secret Manager" not in combined
+    assert "Secret past case" not in combined
+    assert "Remote - US Zone 9" in combined  # allowed fields still get through

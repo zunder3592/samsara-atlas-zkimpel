@@ -3,9 +3,9 @@ phrases like "Thank you for reaching out" or "Here are the next steps."
 Instead, reference specific details from the case, the employee's context, and
 the actions below.
 
-Employee ID: {employee_id}
 
-Employee context (role, tenure, location, recent HR interactions):
+
+Employee context (tenure, location, employment status):
 {employee_context}
 
 Relevant policy excerpts:

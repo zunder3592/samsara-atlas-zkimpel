@@ -10,6 +10,9 @@ from app.tools.registry import get_tool_registry
 from app.schemas import StructuredResponse, ExtractActionsOutput
 
 logger = logging.getLogger(__name__)
+# The only employee fields that go into a model prompt. A new field added to the
+# employee record stays out of the prompt until it is added here on purpose
+PROMPT_EMPLOYEE_FIELDS = ("tenure_years", "location", "employment_status")
 
 
 def _load_prompt(name: str) -> str:
@@ -105,7 +108,6 @@ def _normalize_summary(data: dict) -> dict:
 def summarize_and_extract_actions_step(ctx):
     prompt_tpl = _load_prompt("summarize")
     prompt = prompt_tpl.format(
-        employee_id=ctx.inputs["employee_id"],
         case_transcript=ctx.inputs["case_transcript"],
     )
     data = _ask_for_json(prompt)
@@ -117,13 +119,14 @@ def generate_structured_response_step(ctx):
     employee = ctx.step_outputs.get("retrieve_employee_context", {})
     snippets = ctx.step_outputs.get("retrieve_policy_snippets", [])
     actions = ctx.step_outputs.get("summarize_and_extract_actions", {})
+    #edits to limit emp data going to AI model
+    metadata = employee.get("metadata", {}) if isinstance(employee, dict) else {}
+    employee_str = json.dumps({k: metadata[k] for k in PROMPT_EMPLOYEE_FIELDS if k in metadata}, indent=2)
     actions_str = json.dumps(actions, indent=2) if isinstance(actions, dict) else str(actions)
-    employee_str = json.dumps(employee, indent=2) if isinstance(employee, dict) else str(employee)
     snippets_str = "\n\n---\n\n".join(f"[{i+1}] {s[:600]}" for i, s in enumerate(snippets[:5])) if snippets else "(none retrieved)"
 
     prompt_tpl = _load_prompt("generate_response")
     prompt = prompt_tpl.format(
-        employee_id=ctx.inputs["employee_id"],
         employee_context=employee_str,
         policy_snippets=snippets_str,
         actions=actions_str,
