@@ -146,7 +146,8 @@ def post_case_note_to_hris_step(ctx):
     if not ctx.options.get("write_case_note", True):
         return {"skipped": True, "reason": "case note disabled for this run"}
     response = ctx.step_outputs.get("generate_structured_response", {})
-    note = f"Response drafted: {response.get('subject', '')} - {response.get('body', '')[:200]}"
+    #full note
+    note = f"Response drafted: {response.get('subject', '')} - {response.get('body', '')}"
     registry = get_tool_registry()
     out = registry.execute(
         "post_case_note_to_hris",
