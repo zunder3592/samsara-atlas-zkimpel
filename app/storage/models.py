@@ -18,6 +18,7 @@ class Case(Base):
     outputs_json = Column(Text)
     #add to catch steps that failed, will hold the step and error type
     error = Column(Text)
+    replay_of = Column(Integer, ForeignKey("cases.id"), nullable=True)
 
     steps = relationship("Step", back_populates="case")
     case_notes = relationship("CaseNote", back_populates="case")

@@ -52,6 +52,8 @@ def _mark_failed(db, case_id: int, step_name: str | None, exc: Exception) -> Non
 def run_workflow(
     inputs: dict,
     idempotency_key: str | None = None,
+    replay_of: int | None = None,
+    write_case_note: bool = True,
 ) -> dict:
     db = SessionLocal()
     try:
@@ -96,6 +98,7 @@ def run_workflow(
                 idempotency_key=idempotency_key,
                 inputs_json=json.dumps(inputs),
                 artifacts_json=json.dumps({"prompt_version": "v1"}),
+                replay_of=replay_of
             )
             db.add(case)
             #try except added to work with new WAL configuration in db
@@ -122,6 +125,7 @@ def run_workflow(
             case_id=case.id,
             inputs=inputs,
             artifacts=artifacts,
+            options={"write_case_note": write_case_note}
         )
 
         for step_name, step_fn in STEPS:

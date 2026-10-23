@@ -90,6 +90,7 @@ def get_case(case_id: int):
                 "artifacts": case.artifacts_json,
                 "outputs": case.outputs_json,
                 "error": case.error,
+                "replay_of": case.replay_of,
             },
             "steps": [
                 {
@@ -114,7 +115,8 @@ def get_case(case_id: int):
 
 
 @router.post("/cases/{case_id}/replay")
-def replay_case(case_id: int):
+#new replay feature that logs previous case and toggl for if new note should be sent
+def replay_case(case_id: int, write_case_note: bool = False):
     db = SessionLocal()
     try:
         case = db.query(Case).filter_by(id=case_id).first()
@@ -129,6 +131,8 @@ def replay_case(case_id: int):
         result = run_workflow(
             inputs=inputs,
             idempotency_key=None,
+            replay_of = case_id,
+            write_case_note=write_case_note
         )
         return result
     finally:

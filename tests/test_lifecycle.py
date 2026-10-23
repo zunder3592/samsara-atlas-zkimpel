@@ -191,3 +191,21 @@ def test_case_note_tool_writes_at_most_one_note_per_case(seeded):
 
     post_case_note_to_hris(case_id=case["case_id"], employee_id="E10234", note="second try")
     assert _count(CaseNote, case_id=case["case_id"]) == 1
+
+
+# replay case button 
+
+
+def test_replay_is_linked_and_writes_no_case_note_by_default(client, seeded):
+    original = client.post(
+        "/cases", json={"inputs": _inputs(), "idempotency_key": "lifecycle-replay-orig"}
+    ).json()
+
+    replay = client.post(f"/cases/{original['case_id']}/replay").json()
+    assert replay["case_id"] != original["case_id"]
+    assert _get_case(replay["case_id"]).replay_of == original["case_id"]
+    assert _count(CaseNote, case_id=original["case_id"]) == 1
+    assert _count(CaseNote, case_id=replay["case_id"]) == 0
+
+    with_note = client.post(f"/cases/{original['case_id']}/replay?write_case_note=true").json()
+    assert _count(CaseNote, case_id=with_note["case_id"]) == 1
