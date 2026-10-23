@@ -179,3 +179,15 @@ def test_connection_failure_reports_the_real_error(seeded, monkeypatch):
 
     assert info.value.error_type == "ConnectionError"
     assert provider.calls == 3
+
+
+#one email per case
+
+def test_case_note_tool_writes_at_most_one_note_per_case(seeded):
+    from app.tools.hris import post_case_note_to_hris
+
+    case = run_workflow(_inputs())  # the workflow already wrote one note
+    assert _count(CaseNote, case_id=case["case_id"]) == 1
+
+    post_case_note_to_hris(case_id=case["case_id"], employee_id="E10234", note="second try")
+    assert _count(CaseNote, case_id=case["case_id"]) == 1

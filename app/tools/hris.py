@@ -32,6 +32,10 @@ def post_case_note_to_hris(case_id: int, employee_id: str, note: str) -> dict:
     """Write a case note row to the HRIS. Can create duplicate rows on retry (intentional flaw, see P003)."""
     db = SessionLocal()
     try:
+        #fix to not create duplicate
+        existing = db.query(CaseNote).filter_by(case_id=case_id).first()
+        if existing:
+            return {"id": existing.id, "employee_id": existing.employee_id, "note": existing.note[:100], "already_existed": True}
         case_note = CaseNote(
             case_id=case_id,
             employee_id=employee_id,
