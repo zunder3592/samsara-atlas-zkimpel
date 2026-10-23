@@ -11,19 +11,29 @@ from app.engine.context import ExecutionContext
 from app.engine.steps import STEPS
 from app.storage.database import SessionLocal
 from app.storage.models import Case, Step
+from app.tools.hris import post_case_note_to_hris
 
 
 logger = logging.getLogger(__name__)
+
 #catch when someone inputs an existing idempotency key but with mismatched emp id and/or desc
 class IdempotencyConflict(Exception):
     """The idempotency key was already used with different inputs"""
-
 
 def _check_same_inputs(case: Case, inputs: dict) -> None:
     if json.loads(case.inputs_json or "{}") != inputs:
         raise IdempotencyConflict("Idempotency key was already used with different inputs")
 
+#flag sensitive topics only for human review - should confirm and expand with HR and Legal before production 
+HUMAN_ONLY_TOPICS = {"harassment": ("harass",)}
 
+def _human_only_topic(text: str) -> str | None:
+    """Return the topic name if this case must go to a person, otherwise None."""
+    lowered = text.lower()
+    for topic, fragments in HUMAN_ONLY_TOPICS.items():
+        if any(fragment in lowered for fragment in fragments):
+            return topic
+    return None
 
 #catch failed steps 
 class WorkflowFailed(Exception):
@@ -64,7 +74,7 @@ def run_workflow(
         #use new check to see if an existing idempotency key has the same inputs as the db
         if existing is not None:
             _check_same_inputs(existing, inputs)
-        if existing and existing.status == "completed":
+        if existing and existing.status in ("completed", "needs_human_review"):
             return {
                 "case_id": existing.id,
                 "status": existing.status,
@@ -121,6 +131,27 @@ def run_workflow(
             db.refresh(case)
 
         artifacts = {"prompt_version": "v1", "model_name": "stub"}
+        #remove human reviewed only topics 
+        case_id = case.id
+        topic = _human_only_topic(inputs.get("case_transcript", ""))
+        if topic:
+            try:
+                if write_case_note:
+                    post_case_note_to_hris(
+                        case_id=case_id,
+                        employee_id=inputs["employee_id"],
+                        note=(
+                            f"Case {case_id} routed to HR for human review due to sensitive topic. "
+                            "No automated draft was generated."
+                        ),
+                    )
+            except Exception as e:
+                _mark_failed(db, case_id, "route_to_human", e)
+                raise WorkflowFailed(case_id, "route_to_human", type(e).__name__) from e
+            case.status = "needs_human_review"
+            case.error = f"human review: {topic}"  # topic name only, never the text
+            db.commit()
+            return {"case_id": case_id, "status": case.status, "outputs": {}, "error": case.error}
         ctx = ExecutionContext(
             case_id=case.id,
             inputs=inputs,

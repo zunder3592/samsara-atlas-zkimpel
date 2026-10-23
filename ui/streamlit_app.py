@@ -107,6 +107,13 @@ if submitted:
                     f"Case {result['case_id']} is still running (or was started by an earlier "
                     "request with this key). No new draft was produced. Check it in Case Explorer."
                 )
+            #human review flag
+            elif status == "needs_human_review":
+                st.session_state.pop("case_result", None)
+                st.info(
+                    f"Case {result['case_id']} was routed to HR for human review. "
+                    "No draft was generated."
+                )
             else:
                 st.session_state.pop("case_result", None)
                 st.error(f"Case {result['case_id']} ended with status '{status}': {result.get('error')}")

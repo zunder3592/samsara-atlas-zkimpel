@@ -268,3 +268,42 @@ def test_model_prompts_exclude_employee_id_and_extra_record_fields(db_session, m
     assert "Secret Manager" not in combined
     assert "Secret past case" not in combined
     assert "Remote - US Zone 9" in combined  # allowed fields still get through
+
+#sensitive topic rerouting 
+# --- sensitive topics go to a person ---------------------------------------
+
+
+def test_harassment_case_skips_the_model_and_writes_a_routing_note(seeded, monkeypatch):
+    provider = RecordingProvider()
+    monkeypatch.setattr(steps_module, "get_provider", lambda: provider)
+
+    result = run_workflow(_inputs("I want to report harassment by a coworker."))
+    case_id = result["case_id"]
+
+    assert result["status"] == "needs_human_review"
+    assert provider.prompts == []  # the model was never called
+    assert _count(Step, case_id=case_id) == 0
+    assert _get_case(case_id).error == "human review: harassment"
+
+    db = SessionLocal()
+    try:
+        note = db.query(CaseNote).filter_by(case_id=case_id).one().note
+    finally:
+        db.close()
+    assert note == (
+        f"Case {case_id} routed to HR for human review due to sensitive topic. "
+        "No automated draft was generated."
+    )
+    assert "coworker" not in note  # the note never contains the case text
+
+
+def test_human_review_case_is_returned_again_for_the_same_key(seeded):
+    key = "lifecycle-human-review-key"
+    text = "I am being harassed at work."
+    first = run_workflow(_inputs(text), idempotency_key=key)
+    second = run_workflow(_inputs(text), idempotency_key=key)
+    assert first["status"] == "needs_human_review"
+    assert second["case_id"] == first["case_id"]
+    assert second["status"] == "needs_human_review"
+    assert _count(Case, idempotency_key=key) == 1
+    assert _count(CaseNote, case_id=first["case_id"]) == 1
