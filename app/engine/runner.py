@@ -3,9 +3,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 
 
@@ -26,11 +24,31 @@ def _check_same_inputs(case: Case, inputs: dict) -> None:
         raise IdempotencyConflict("Idempotency key was already used with different inputs")
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
-    retry=retry_if_exception_type((TimeoutError, ValidationError, ValueError)),
-)
+
+#catch failed steps 
+class WorkflowFailed(Exception):
+    """A failure occured. Case saved with status "failed" and the error in cases table"""
+
+    def __init__(self, case_id: int, step_name: str | None, error_type: str):
+        super().__init__(f"case {case_id} failed at step {step_name}: {error_type}")
+        self.case_id = case_id
+        self.step_name = step_name
+        self.error_type = error_type
+
+
+def _mark_failed(db, case_id: int, step_name: str | None, exc: Exception) -> None:
+    """Record the failure on the case: step and error type only."""
+    try:
+        db.rollback()
+        case = db.get(Case, case_id)
+        case.status = "failed"
+        case.error = f"{step_name}: {type(exc).__name__}"
+        db.commit()
+    except Exception:
+        logger.exception("Could not record failure for case %s", case_id)
+
+
+
 def run_workflow(
     inputs: dict,
     idempotency_key: str | None = None,
@@ -56,10 +74,22 @@ def run_workflow(
                 "status": existing.status,
                 "outputs": json.loads(existing.outputs_json or "{}"),
             }
-        if existing and existing.status == "failed":
-            case = existing
-            case.status = "running"
+        #previously failed case, resume. eliminates potential duplicates if previous failed case is rerun twice 
+        if existing and existing.status == "failed": 
+            claimed = (
+                db.query(Case)
+                .filter(Case.id == existing.id, Case.status == "failed")
+                .update({"status": "running", "error": None}) 
+            )
             db.commit()
+            if not claimed:
+                db.refresh(existing)
+                return {
+                    "case_id": existing.id,
+                    "status": existing.status,
+                    "outputs": json.loads(existing.outputs_json or "{}"),
+                }
+            case = existing
         else:
             case = Case(
                 status="running",
@@ -112,11 +142,13 @@ def run_workflow(
                 step_record.status = "completed"
                 step_record.output_json = json.dumps(output) if not isinstance(output, (str, int, float, bool)) else json.dumps({"value": output})
             except Exception as e:
-                logger.exception("Step failed")
+                #log the failed step's error type and mark the step as failed
+                logger.error("Step %s failed for case %s: %s", step_name, case.id, type(e).__name__)
                 step_record.status = "failed"
-                step_record.error = str(e)
+                step_record.error = f"{type(e).__name__}: {str(e)[:200]}"
                 db.commit()
-                raise
+                _mark_failed(db, case.id, step_name, e)
+                raise WorkflowFailed(case.id, step_name, type(e).__name__) from e
 
             step_record.finished_at = datetime.now(timezone.utc)
             step_record.attempts = getattr(step_record, "attempts", 1)

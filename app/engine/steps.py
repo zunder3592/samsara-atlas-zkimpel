@@ -53,6 +53,7 @@ def step_retry(exc):
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
     retry=retry_if_exception_type((TimeoutError, ConnectionError, OSError)),
+    reraise=True # surfaces true error
 )
 def _retryable_llm_call(prompt: str, **kwargs):
     provider = get_provider()
@@ -66,6 +67,16 @@ def _retryable_llm_call(prompt: str, **kwargs):
             text = msg.get("content", text)
     return text
 
+@retry(
+    stop=stop_after_attempt(2),
+    retry=retry_if_exception_type(json.JSONDecodeError),
+    reraise=True,
+)
+def _ask_for_json(prompt: str, **kwargs) -> dict:
+    """Ask the model and read its reply as JSON. If the reply isn't valid
+    JSON, ask again once. Only this step is retried, so a retry never
+    re-runs earlier steps."""
+    return _parse_json_from_text(_retryable_llm_call(prompt, **kwargs))
 
 def retrieve_employee_context_step(ctx):
     registry = get_tool_registry()
@@ -97,8 +108,7 @@ def summarize_and_extract_actions_step(ctx):
         employee_id=ctx.inputs["employee_id"],
         case_transcript=ctx.inputs["case_transcript"],
     )
-    text = _retryable_llm_call(prompt)
-    data = _parse_json_from_text(text)
+    data = _ask_for_json(prompt)
     # ExtractActionsOutput is defined in schemas.py but never used to validate `data` here (see P013).
     return _normalize_summary(data)
 
@@ -119,8 +129,7 @@ def generate_structured_response_step(ctx):
         actions=actions_str,
         tone=ctx.inputs["tone"],
     )
-    text = _retryable_llm_call(prompt, tone=ctx.inputs["tone"])
-    data = _parse_json_from_text(text)
+    data = _ask_for_json(prompt, tone=ctx.inputs["tone"])
     normalized = {
         "subject": data.get("subject", data.get("Subject", "")),
         "body": data.get("body", data.get("Body", "")),
