@@ -1,0 +1,59 @@
+# Design Note: Zoe Kimpel for AI Engineer
+ 
+To complete this assessment, I prioritized issues that impacted employee data privacy, correctness, and auditability. New tests to cover the new, larger features are in `tests/test_lifecycle.py`.
+ 
+## Assumptions
+ 
+- **Goal of production is to automate system completely.** With no reviewer reading each draft, the checks a reviewer would do have to be done by the system itself. I ranked the missing policy check and the gaps in the keyword screening higher than I would if a person approved every draft.
+- **Sensitive topics should not be fully automated in the system.** Sensitive topics such as harassment and discrimination should be dealt with more carefully and should not be fully automated for potential legal and/or ethical concerns.  
+- **The UI is an internal tool for HR staff only.** Employees would not use the UI directly, so they could not type an idempotency key, generate a response, or see earlier responses. 
+- **`allow_origins=["*"]` is a feature of a take-home exam** and would not be part of production.
+
+## Issues Found & Changes Made
+ 
+**Severity Key**
+ 
+- **High:** could return the wrong employee's data, puts a wrong or duplicate entry on an employee's record, sends an employee wrong information, or exposes or needlessly shares sensitive data.
+- **Medium:** weakens the audit trail or misleads users, or needs a deliberate user action to cause harm. It does not by itself expose data or corrupt records.
+| # | Severity | Issue | Fix | Files Changed |
+|---|---|---|---|---|
+| 1 | High | Keyless requests returned someone else's case. With no idempotency key, `run_workflow` searched for `idempotency_key = NULL`, which matched the first earlier case that had no key. The UI appeared to ignore a new employee or description, and one person's result could be returned for another person's request. | `run_workflow` now searches for an existing case only when a key is provided. A request with no key always creates a new case. | `app/engine/runner.py`, `tests/test_lifecycle.py` |
+| 2 | High | Concurrent requests could create duplicates. The idempotency key had no database uniqueness, so simultaneous requests with the same key could each create a case, run the workflow, and write a note to the employee's HR record. | Unique constraint on `idempotency_key`. When two requests race, the database picks one winner and the other returns that case. SQLite runs in WAL mode with a 30s busy timeout so waiting writers do not error. | `app/storage/models.py`, `app/storage/database.py`, `app/engine/runner.py`, `tests/test_lifecycle.py` |
+| 3 | High | A reused key with different inputs returned the old result silently. Employee B's request could be answered with employee A's earlier response, with no warning. | Same key with different inputs returns HTTP 409. Same key with the same inputs returns the stored result (completed or running) and runs nothing. | `app/engine/runner.py`, `app/api/routes.py`, `tests/test_lifecycle.py` |
+| 4 | High | Failures were not recorded and leaked detail. A failed step left the case as `running` forever, so the same key kept returning "running". The API also printed and returned the traceback, whose message can quote the case description. | New `cases.error` column and status `failed`. Only the step name and error type are stored and logged, never message text. The API returns the case id with a 500. The same key resumes a failed case, and an atomic conditional UPDATE lets only one concurrent request take it over. | `app/storage/models.py`, `app/engine/runner.py`, `app/api/routes.py`, `tests/test_lifecycle.py` |
+| 5 | High | A broad whole-workflow retry caused false successes and orphans. `run_workflow` retried on `ValueError`, `ValidationError` and `OSError`. Each retry re-ran all five steps from the start, creating new case rows, repeating the HR write, and hiding the original failure. | Retries only around the model call: connection errors up to 3 times, malformed model JSON asked for once more. The whole-workflow retry is removed, so a retry cannot repeat earlier steps or side effects. | `app/engine/steps.py`, `app/engine/runner.py`, `tests/test_lifecycle.py` |
+| 6 | High | The HR note tool added a note on every call. Any resume or retry put another note on the employee's HR record. | The tool returns the existing note for a case instead of adding another. | `app/tools/hris.py`, `tests/test_lifecycle.py` |
+| 7 | High | Harassment cases went to the model. The description was sent to the model like any other case. The prompt only asked the model to "be conservative", which is a request and not a control, so the model could produce a wrong or insensitive reply to a complaint. | If the description contains "harass", the model is skipped. The case is saved with its full text and status `needs_human_review` (topic name stored in `cases.error`), and a routing note with no case text is written to the HR record. Harassment is the only topic in this version. | `app/engine/runner.py`, `ui/streamlit_app.py`, `tests/test_lifecycle.py` |
+| 8 | High | Prompts contained more employee data than needed. Both prompts included the employee ID, and the response step included the full record: manager, level, department, and past case summaries. The manager's name appeared in a drafted email. | The employee ID is removed from both prompts so employee data is not fed to an AI model unnecessarily, and an allowlist (`tenure_years`, `location`, `employment_status`) controls which record fields appear, so only the fields needed for context are included. | `app/prompts/summarize.txt`, `app/prompts/generate_response.txt`, `app/engine/steps.py`, `tests/test_lifecycle.py` |
+| 9 | High | Policy text was cut short, and the model invented a policy detail. Retrieval truncated each policy at 500 characters (and the response step at 600). The leave policy lost its "Job Protection" section, including "do not confirm eligibility informally", and the PTO policy ended mid-word. Separately, one draft promised "5 paid sick days", which appears in no policy file. | Truncation removed. The prompt now tells the model to state policy details only if they appear in the excerpts. | `app/tools/retrieval.py`, `app/engine/steps.py`, `app/prompts/generate_response.txt` |
+| 10 | Medium | The HR note was cut at 200 characters. The note step stored only the first 200 characters of the body, often mid-sentence, so the record on the employee's file was incomplete. | The HR note holds the full drafted subject and body. The sensitive text is now stored in two places (case row and note). | `app/engine/steps.py` |
+| 11 | Medium | Replay was untraceable and added a duplicate note. A replay created a new case with no link to the original and wrote another HR note, so nobody could tell which case was a re-run. | New `cases.replay_of` column links a replay to its original. A replay writes no HR note unless `?write_case_note=true`. | `app/storage/models.py`, `app/engine/context.py`, `app/engine/runner.py`, `app/engine/steps.py`, `app/api/routes.py`, `tests/test_lifecycle.py` |
+| 12 | Medium | The UI always said "Case completed". A failed or still-running case looked like a success with an empty draft. | The UI shows the real status (completed, running, failed, routed to human review). | `ui/streamlit_app.py` |
+ 
+## Tradeoffs
+ 
+- **Saving only error type and not the full message in logs.** Safer for privacy and production scalability, harder to debug. The first 200 characters can be found in the steps table. 
+- **Automatic retries only inside the model call step.** A small list of errors are retried within a step automatically instead of all errors. The original, catch all retry re-ran every step, created orphan cases and could hide underlying errors. 
+- **Failed cases are regenerated with user input.** A failed case is resumed when the same key is sent again by the user of the system. Automatic recovery would need step skipping and a limit on which errors are retried to prevent getting stuck in a loop. This also simplified infrastructure/pipeline. 
+- **Sensitive topics are flagged via a keyword search.** This new system feature misses cases with descriptions written without the keywords listed in `HUMAN_ONLY_TOPICS`. However, the ability to reroute sensitive cases to a human is a safer system. 
+- **The routing note carries no case text.** The general HR record does not expose the complaint. The details stay on the case row, where access can be restricted.
+- **A resumed case re-runs all five steps.** The HR note step is protected against duplicates, but the model steps run again.
+- **The prompt rule about staying within the policy is a request, not enforcement.** and cannot be tested deterministically. 
+
+## Items to Fix and/or Verify Before Production
+ 
+1. **Authentication and authorization.** The API has no login, so anyone who can reach it can list and read any case. Only HR staff should be able to read cases.
+2. **Consider a warning message that AI is used in the system.** Based on the final production system, add a warning in the tool and/or drafted response that AI was used in the system and can be wrong. Can link to exact policy documents or list HR's email for additional questions. 
+3. **Add checks to AI created drafts.** With no person reviewing the model's output, nothing catches a wrong draft. Production needs to check drafts and `cited_snippets` against the retrieved text, a rule for questions no policy covers (route to a person), section-level chunking for longer policies, a test set with known correct answers, regular audits of sampled drafts, and a way to switch automation off quickly. Today the system only stores a draft. An automated version needs a send step that records exactly what was sent.
+4. **Record the real model and prompt.** `artifacts_json` always says `model_name: "stub"` and `prompt_version: "v1"`, and prompts are read from the current file, so a replay can differ from the original. Store the model, a prompt version or hash, and the prompt each step used.
+5. **Complete routed cases process.** Today the note and the `needs_human_review` status are all that exist. Add a real notification, ownership, and a reviewed list of sensitive topics (discrimination, retaliation) decided with HR and legal, with routing to a person as the default when the system is unsure. Could also look at handling these cases via prompting instead of a key word search. 
+6. **Test the model on a golden set before launch.** A fixed set of cases with HR-approved answers, covering routine questions, questions no policy covers, near-miss sensitive wording, and hidden instructions. Score policy accuracy, citations, leaked employee details, and routing. Test with HR first.
+7. **Finalize prompt language.** Consider adding more detail such as when meetings are necessary. Simple questions such as PTO were answered by suggesting a follow up meeting, which is not needed for all topics. 
+
+## Next Steps for Scaling
+ 
+- Migrate to production-ready database and set retention policy. SQLite allows one writer at a time, which is the ceiling for concurrent submissions which would be a struggle in production. Postgres is one option but should evaluate Samsara's tech stack first. Decide retention policy for all data created within the system with HR. Also consider not storing the chunked policy snippets for all policies for every case, as this would likely explode the amount of data in production. Could instead link to a version/ID for each policy for visibility. 
+- Control model concurrency with rate limits and backpressure to prevent overloading the system to failure with too many concurrent requests.
+- Increase observability and logging with metrics for step latency, retry counts, failure types, routed cases.
+ 
+
