@@ -9,5 +9,6 @@ class ExecutionContext:
     inputs: dict
     artifacts: dict
     step_outputs: dict[str, Any] = field(default_factory=dict)
+    options: dict = field(default_factory=dict) #allows for a flag to re-email a replayed case
     trace: list[dict] = field(default_factory=list)  # never populated - see P016
     started_at: float = field(default_factory=time.time)

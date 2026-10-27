@@ -56,7 +56,8 @@ def retrieve_policy_snippets(query: str, top_k: int = 5) -> list[str]:
     for score, name, content in scored[: top_k * 2]:
         if score <= 0:
             continue
-        chunk = content[:500] if len(content) > 500 else content
+        #no truncation
+        chunk = content
         if chunk in seen:
             continue
         seen.add(chunk)

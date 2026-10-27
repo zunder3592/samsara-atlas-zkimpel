@@ -95,9 +95,28 @@ if submitted:
                 tone=tone,
                 idempotency_key=idempotency_key or None,
             )
-            st.success(f"Case completed: {result['case_id']}")
             st.session_state["last_case_id"] = result["case_id"]
-            st.session_state["case_result"] = result
+            #if else to display true status instead of just completed 
+            status = result.get("status")
+            if status == "completed":
+                st.success(f"Case completed: {result['case_id']}")
+                st.session_state["case_result"] = result
+            elif status == "running":
+                st.session_state.pop("case_result", None)
+                st.warning(
+                    f"Case {result['case_id']} is still running (or was started by an earlier "
+                    "request with this key). No new draft was produced. Check it in Case Explorer."
+                )
+            #human review flag
+            elif status == "needs_human_review":
+                st.session_state.pop("case_result", None)
+                st.info(
+                    f"Case {result['case_id']} was routed to HR for human review. "
+                    "No draft was generated."
+                )
+            else:
+                st.session_state.pop("case_result", None)
+                st.error(f"Case {result['case_id']} ended with status '{status}': {result.get('error')}")
         except requests.exceptions.RequestException as e:
             st.error(f"Error: {e}")
 
